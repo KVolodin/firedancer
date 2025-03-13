@@ -25,7 +25,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          ./deps.sh +dev
+          bash -x ./deps.sh fetch check install
 
       - name: Build Firedancer
         run: |

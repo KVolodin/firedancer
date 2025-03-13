@@ -55,7 +55,7 @@ get_signature_cost( fd_exec_txn_ctx_t const * txn_ctx ) {
 
   /* https://github.com/anza-xyz/agave/blob/v2.2.0/cost-model/src/cost_model.rs#L155-L160 */
   ulong ed25519_verify_cost;
-  if( FD_FEATURE_ACTIVE( txn_ctx->slot_ctx, ed25519_precompile_verify_strict ) ) {
+  if( FD_FEATURE_ACTIVE( txn_ctx->slot_bank->slot, txn_ctx->features, ed25519_precompile_verify_strict ) ) {
     ed25519_verify_cost = fd_ulong_sat_mul( FD_PACK_COST_PER_ED25519_SIGNATURE, num_ed25519_instruction_signatures );
   } else {
     ed25519_verify_cost = fd_ulong_sat_mul( FD_PACK_COST_PER_NON_STRICT_ED25519_SIGNATURE, num_ed25519_instruction_signatures );
@@ -63,7 +63,7 @@ get_signature_cost( fd_exec_txn_ctx_t const * txn_ctx ) {
 
   /* https://github.com/anza-xyz/agave/blob/v2.2.0/cost-model/src/cost_model.rs#L162-L167 */
   ulong secp256r1_verify_cost = 0UL;
-  if( FD_FEATURE_ACTIVE( txn_ctx->slot_ctx, enable_secp256r1_precompile ) ) {
+  if( FD_FEATURE_ACTIVE( txn_ctx->slot_bank->slot, txn_ctx->features, enable_secp256r1_precompile ) ) {
     secp256r1_verify_cost = fd_ulong_sat_mul( FD_PACK_COST_PER_SECP256R1_SIGNATURE, num_secp256r1_instruction_signatures );
   }
 
@@ -336,15 +336,15 @@ fd_cost_tracker_init( fd_cost_tracker_t *        self,
                       fd_spad_t *                spad ) {
   // Set limits appropriately
   self->account_cost_limit = FD_MAX_WRITABLE_ACCOUNT_UNITS;
-  self->block_cost_limit   = FD_FEATURE_ACTIVE( slot_ctx, raise_block_limits_to_50m ) ? FD_MAX_BLOCK_UNITS_SIMD_0207 : FD_MAX_BLOCK_UNITS;
+  self->block_cost_limit   = FD_FEATURE_ACTIVE( slot_ctx->slot_bank.slot, slot_ctx->epoch_ctx->features, raise_block_limits_to_50m ) ? FD_MAX_BLOCK_UNITS_SIMD_0207 : FD_MAX_BLOCK_UNITS;
   self->vote_cost_limit    = FD_MAX_VOTE_UNITS;
 
   /* Init cost tracker map
      TODO: The maximum number of accounts within a block needs to be bounded out properly. It's currently
      hardcoded here at 4096*1024 accounts. */
   self->cost_by_writable_accounts.account_costs_root = NULL;
-  self->cost_by_writable_accounts.account_costs_pool = fd_account_costs_pair_t_map_alloc( fd_spad_virtual( spad ),
-                                                                                          FD_WRITABLE_ACCOUNTS_PER_BLOCK * 1024UL );
+  uchar * pool_mem                                   = fd_spad_alloc( spad, fd_account_costs_pair_t_map_align(), fd_account_costs_pair_t_map_footprint( FD_WRITABLE_ACCOUNTS_PER_BLOCK * 1024UL ) );
+  self->cost_by_writable_accounts.account_costs_pool = fd_account_costs_pair_t_map_join( fd_account_costs_pair_t_map_new( pool_mem, FD_WRITABLE_ACCOUNTS_PER_BLOCK * 1024UL ) );
   if( FD_UNLIKELY( !self->cost_by_writable_accounts.account_costs_pool ) ) {
     FD_LOG_ERR(( "failed to allocate memory for cost tracker accounts pool" ));
   }

@@ -15,7 +15,7 @@
 #include <sys/wait.h>
 
 fd_topo_run_tile_t
-fdctl_tile_run( fd_topo_tile_t * tile );
+fdctl_tile_run( fd_topo_tile_t const * tile );
 
 void
 dev_cmd_args( int *    pargc,
@@ -85,7 +85,7 @@ install_parent_signals( void ) {
 
 
 void
-update_config_for_dev( config_t * const config ) {
+update_config_for_dev( config_t * config ) {
   /* By default only_known is true for validators to ensure secure
      snapshot download, but in development it doesn't matter and
      often the developer does not provide known peers. */
@@ -149,11 +149,15 @@ update_config_for_dev( config_t * const config ) {
   }
 }
 
+#if !FD_HAS_NO_AGAVE
+
 static void *
 agave_main1( void * args ) {
   agave_boot( args );
   return NULL;
 }
+
+#endif
 
 /* Run Firedancer entirely in a single process for development and
    debugging convenience. */
@@ -184,19 +188,21 @@ run_firedancer_threaded( config_t * config , int init_workspaces) {
   fd_topo_join_workspaces( &config->topo, FD_SHMEM_JOIN_MODE_READ_WRITE );
   fd_topo_run_single_process( &config->topo, 2, config->uid, config->gid, fdctl_tile_run, NULL );
 
+#if !FD_HAS_NO_AGAVE
   if( FD_LIKELY( !config->development.no_agave ) ) {
     pthread_t pthread;
     if( FD_UNLIKELY( pthread_create( &pthread, NULL, agave_main1, config ) ) ) FD_LOG_ERR(( "pthread_create() failed (%i-%s)", errno, fd_io_strerror( errno ) ));
     if( FD_UNLIKELY( pthread_setname_np( pthread, "fdSolMain" ) ) ) FD_LOG_ERR(( "pthread_setname_np() failed (%i-%s)", errno, fd_io_strerror( errno ) ));
   }
+#endif
 
   /* None of the threads will ever exit, they just abort the process, so sleep forever. */
   for(;;) pause();
 }
 
 void
-dev_cmd_fn( args_t *         args,
-            config_t * const config ) {
+dev_cmd_fn( args_t *   args,
+            config_t * config ) {
   if( FD_LIKELY( !args->dev.no_configure ) ) {
     args_t configure_args = {
       .configure.command = CONFIGURE_CMD_INIT,

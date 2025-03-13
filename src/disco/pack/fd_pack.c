@@ -266,7 +266,7 @@ typedef struct fd_pack_bitset_acct_mapping fd_pack_bitset_acct_mapping_t;
      could be because of a bug in the code that generated the
      initializer bundle, a lack of fee payer balance, or an expired
      blockhash.
-   * READY: the most recently scheduled initialzation bundle succeeded
+   * READY: the most recently scheduled initialization bundle succeeded
      and normal bundles can be scheduled in this slot. */
 #define FD_PACK_IB_STATE_NOT_INITIALIZED 0
 #define FD_PACK_IB_STATE_PENDING         1
@@ -754,9 +754,11 @@ fd_pack_new( void                   * mem,
 
   penalty_map_new( _penalty_map, lg_penalty_trp );
 
-  treap_new( (void*)pack->pending,         pack_depth );
-  treap_new( (void*)pack->pending_votes,   pack_depth );
-  treap_new( (void*)pack->pending_bundles, pack_depth );
+  /* These treaps can have at most pack_depth elements at any moment,
+     but they come from a pool of size pack_depth+extra_depth. */
+  treap_new( (void*)pack->pending,         pack_depth+extra_depth );
+  treap_new( (void*)pack->pending_votes,   pack_depth+extra_depth );
+  treap_new( (void*)pack->pending_bundles, pack_depth+extra_depth );
 
   pack->pending_smallest->cus         = ULONG_MAX;
   pack->pending_smallest->bytes       = ULONG_MAX;
@@ -1309,7 +1311,7 @@ fd_pack_insert_bundle_cancel( fd_pack_t          * pack,
                               ulong                txn_cnt ) {
   /* There's no real reason these have to be released in reverse, but it
      seems fitting to release them in the opposite order they were
-     aquired. */
+     acquired. */
   for( ulong i=0UL; i<txn_cnt; i++ ) trp_pool_ele_release( pack->pool, (fd_pack_ord_txn_t*)bundle[ txn_cnt-1UL-i ] );
 }
 
@@ -1417,7 +1419,7 @@ fd_pack_insert_bundle_fini( fd_pack_t          * pack,
      r_5/c_5.  For convenience, we'll impose a slightly stronger
      constraint: we want the kth bundle to obey L*(N-k) <= r_i/c_i <
      L*(N+1-k), for fixed constants L and N, real and integer,
-     resepctively, that we'll determine. For example, this means r_4/c_4
+     respectively, that we'll determine. For example, this means r_4/c_4
      >= L*N > r_5/c_5.  This enables us to group the transactions in the
      same bundle more easily.
 
@@ -1425,7 +1427,7 @@ fd_pack_insert_bundle_fini( fd_pack_t          * pack,
      transactions from the jth bundle c_0, ... c_4.
      From above, we know that Lj <= r_4/c_4.  We'd like to make it as
      close as possible given that r_4 is an integers.  Thus, put
-     r_4 = ceil( c_4 * Lj ).  r_4 is clearly an integer, and it satifies
+     r_4 = ceil( c_4 * Lj ).  r_4 is clearly an integer, and it satisfies
      the required inequality because:
             r_4/c_4 = ceil( c_4 * Lj)/c_4 >= c_4*Lj / c_4 >= Lj.
 
@@ -1966,7 +1968,7 @@ fd_pack_microblock_complete( fd_pack_t * pack,
        BIT_CLEARED.  Then we get two more transactions that read
        accounts C, D, A, B, and they get assigned 0->C, 1->D, 2->A,
        3->B.  We try to schedule a microblock to bank 1 that takes one
-       of those transactions.   This unsets BIT_CLEARED for A, B.
+       of those transactions.  This unsets BIT_CLEARED for A, B.
        Finally, the first microblock completes.  Even though the bitset
        map has the new bits for A and B which are "wrong" compared to
        when the transaction was initially scheduled, those bits have
@@ -1983,7 +1985,7 @@ fd_pack_microblock_complete( fd_pack_t * pack,
       FD_PACK_BITSET_CLEARN( bitset_rw_in_use, q->bit );
 
       /* Because this account is no longer in use, it might be possible
-         to schedule a transaction that writes to it.  Check it's
+         to schedule a transaction that writes to it.  Check its
          penalty treap if it has one, and potentially move it to the
          main treap. */
       fd_pack_penalty_treap_t * p_trp = penalty_map_query( pack->penalty_treaps, base[i].key, NULL );
@@ -2244,6 +2246,7 @@ fd_pack_try_schedule_bundle( fd_pack_t  * pack,
 
     pack->cumulative_block_cost += cur->compute_est;
     pack->data_bytes_consumed   += cur->txn->payload_sz + MICROBLOCK_DATA_OVERHEAD;
+    pack->microblock_cnt        += 1UL;
 
     sig2txn_ele_remove_fast( pack->signature_map, cur, pack->pool );
 
@@ -2398,63 +2401,26 @@ fd_pack_set_block_limits( fd_pack_t * pack,
 }
 
 void
-fd_pack_rebate_cus( fd_pack_t        * pack,
-                    fd_txn_p_t const * txns,
-                    ulong              txn_cnt ) {
+fd_pack_rebate_cus( fd_pack_t              * pack,
+                    fd_pack_rebate_t const * rebate ) {
+  if( FD_UNLIKELY( (rebate->ib_result!=0) & (pack->initializer_bundle_state==FD_PACK_IB_STATE_PENDING ) ) ) {
+    pack->initializer_bundle_state = fd_int_if( rebate->ib_result==1, FD_PACK_IB_STATE_READY, FD_PACK_IB_STATE_FAILED );
+  }
+
+  pack->cumulative_block_cost  -= rebate->total_cost_rebate;
+  pack->cumulative_vote_cost   -= rebate->vote_cost_rebate;
+  pack->data_bytes_consumed    -= rebate->data_bytes_rebate;
+  pack->microblock_cnt         -= rebate->microblock_cnt_rebate;
+  pack->cumulative_rebated_cus += rebate->total_cost_rebate;
+
   fd_pack_addr_use_t * writer_costs = pack->writer_costs;
-
-  ulong cumulative_vote_cost   = pack->cumulative_vote_cost;
-  ulong cumulative_block_cost  = pack->cumulative_block_cost;
-  ulong data_bytes_consumed    = pack->data_bytes_consumed;
-  ulong cumulative_rebated_cus = pack->cumulative_rebated_cus;
-
-  /* make sure rebate with txn_cnt==0 is a no-op */
-  int is_initializer_bundle = txn_cnt>0UL;
-  int ib_success            = 1;
-
-  for( ulong i=0UL; i<txn_cnt; i++ ) {
-    fd_txn_p_t const * txn = txns+i;
-    ulong rebated_cus   = txn->bank_cu.rebated_cus;
-    int   in_block      = !!(txn->flags & FD_TXN_P_FLAGS_EXECUTE_SUCCESS);
-
-    /* For IB purposes, treat AlreadyProcessed (7) as success.  If one
-       transaction is an initializer bundle, they all must be, so it's
-       unclear if the first line should be an |= or an &=, but &= seems
-       more right. */
-    is_initializer_bundle &= !!(txn->flags & FD_TXN_P_FLAGS_INITIALIZER_BUNDLE);
-    ib_success            &= in_block | ((txn->flags&FD_TXN_P_FLAGS_RESULT_MASK)==(7U<<24));
-
-    cumulative_block_cost  -= rebated_cus;
-    cumulative_vote_cost   -= fd_ulong_if( txn->flags & FD_TXN_P_FLAGS_IS_SIMPLE_VOTE, rebated_cus,     0UL );
-    data_bytes_consumed    -= fd_ulong_if( !in_block,                                  txn->payload_sz, 0UL );
-    cumulative_rebated_cus += rebated_cus;
-
-    fd_acct_addr_t const * accts = fd_txn_get_acct_addrs( TXN(txn), txn->payload );
-    /* TODO: For now, we don't have a way to rebate writer costs for ALT
-       accounts.  We've thrown away the ALT expansion at this point.
-       The rebate system is going to be rewritten soon for performance,
-       so it's okay. */
-    for( fd_txn_acct_iter_t iter=fd_txn_acct_iter_init( TXN(txn), FD_TXN_ACCT_CAT_WRITABLE & FD_TXN_ACCT_CAT_IMM );
-        iter!=fd_txn_acct_iter_end(); iter=fd_txn_acct_iter_next( iter ) ) {
-
-      ulong i=fd_txn_acct_iter_idx( iter );
-
-      fd_pack_addr_use_t * in_wcost_table = acct_uses_query( writer_costs, accts[i], NULL );
-      if( FD_UNLIKELY( !in_wcost_table ) ) FD_LOG_ERR(( "Rebate to unknown written account" ));
-      in_wcost_table->total_cost -= rebated_cus;
-      /* Important: Even if this is 0, don't delete it from the table so
-         that the insert order doesn't get messed up. */
-    }
+  for( ulong i=0UL; i<rebate->writer_cnt; i++ ) {
+    fd_pack_addr_use_t * in_wcost_table = acct_uses_query( writer_costs, rebate->writer_rebates[i].key, NULL );
+    if( FD_UNLIKELY( !in_wcost_table ) ) FD_LOG_ERR(( "Rebate to unknown written account" ));
+    in_wcost_table->total_cost -= rebate->writer_rebates[i].rebate_cus;
+    /* Important: Even if this is 0, don't delete it from the table so
+       that the insert order doesn't get messed up. */
   }
-
-  if( FD_UNLIKELY( is_initializer_bundle & (pack->initializer_bundle_state==FD_PACK_IB_STATE_PENDING ) ) ) {
-    pack->initializer_bundle_state = fd_int_if( ib_success, FD_PACK_IB_STATE_READY, FD_PACK_IB_STATE_FAILED );
-  }
-
-  pack->cumulative_vote_cost   = cumulative_vote_cost;
-  pack->cumulative_block_cost  = cumulative_block_cost;
-  pack->data_bytes_consumed    = data_bytes_consumed;
-  pack->cumulative_rebated_cus = cumulative_rebated_cus;
 }
 
 
@@ -2647,7 +2613,7 @@ delete_transaction( fd_pack_t         * pack,
   }
 
   if( FD_UNLIKELY( delete_full_bundle & (root==pack->pending_bundles) ) ) {
-    /* When we delete, the sturcture of the treap may move around, but
+    /* When we delete, the structure of the treap may move around, but
        pointers to inside the pool will remain valid */
     fd_pack_ord_txn_t * bundle_ptrs[ FD_PACK_MAX_TXN_PER_BUNDLE-1UL ];
     fd_pack_ord_txn_t * pool       = pack->pool;

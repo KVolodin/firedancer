@@ -246,8 +246,7 @@ fd_exec_test_instr_context_create( fd_exec_instr_test_runner_t *        runner,
   assert( epoch_ctx );
   assert( slot_ctx  );
 
-  ctx->slot_ctx   = slot_ctx;
-  ctx->txn_ctx    = txn_ctx;
+  ctx->txn_ctx = txn_ctx;
 
   /* Set up epoch context. Defaults obtained from GenesisConfig::Default() */
   fd_epoch_bank_t * epoch_bank = fd_exec_epoch_ctx_epoch_bank( epoch_ctx );
@@ -542,10 +541,12 @@ fd_exec_test_instr_context_create( fd_exec_instr_test_runner_t *        runner,
     return 0;
   }
 
-  ctx->epoch_ctx = epoch_ctx;
   ctx->funk_txn  = funk_txn;
   ctx->acc_mgr   = acc_mgr;
   ctx->instr     = info;
+
+  /* Refresh the setup from the updated slot and epoch ctx. */
+  fd_exec_txn_ctx_from_exec_slot_ctx( slot_ctx, txn_ctx );
 
   fd_log_collector_init( &ctx->txn_ctx->log_collector, 1 );
   fd_base58_encode_32( ctx->instr->program_id_pubkey.uc, NULL, ctx->program_id_base58 );
@@ -686,7 +687,8 @@ _txn_context_create_and_exec( fd_exec_instr_test_runner_t *      runner,
 
   /* Provide default slot hashes of size 1 if not provided */
   if( !slot_ctx->sysvar_cache->has_slot_hashes ) {
-    fd_slot_hash_t * slot_hashes = deq_fd_slot_hash_t_alloc( fd_spad_virtual( runner->spad ), 1 );
+    uchar * deque_mem = fd_spad_alloc( runner->spad, deq_fd_slot_hash_t_align(), deq_fd_slot_hash_t_footprint( 1 ) );
+    fd_slot_hash_t * slot_hashes = deq_fd_slot_hash_t_join( deq_fd_slot_hash_t_new( deque_mem, 1 ) );
     fd_slot_hash_t * dummy_elem = deq_fd_slot_hash_t_push_tail_nocopy( slot_hashes );
     memset( dummy_elem, 0, sizeof(fd_slot_hash_t) );
     fd_slot_hashes_t default_slot_hashes = { .hashes = slot_hashes };
@@ -724,10 +726,9 @@ _txn_context_create_and_exec( fd_exec_instr_test_runner_t *      runner,
      THIS MAY CHANGE IN THE FUTURE. If there are other parts of transaction execution that use
      the epoch rewards sysvar, we may need to update this.
   */
-  if ( (
-      FD_FEATURE_ACTIVE( slot_ctx, enable_partitioned_epoch_reward ) ||
-      FD_FEATURE_ACTIVE( slot_ctx, partitioned_epoch_rewards_superfeature )
-      ) && !slot_ctx->sysvar_cache->has_epoch_rewards ) {
+  if( (FD_FEATURE_ACTIVE( slot_ctx->slot_bank.slot, slot_ctx->epoch_ctx->features, enable_partitioned_epoch_reward ) ||
+       FD_FEATURE_ACTIVE( slot_ctx->slot_bank.slot, slot_ctx->epoch_ctx->features, partitioned_epoch_rewards_superfeature ))
+      && !slot_ctx->sysvar_cache->has_epoch_rewards ) {
     fd_point_value_t point_value = {0};
     fd_hash_t const * last_hash = test_ctx->blockhash_queue_count > 0 ? (fd_hash_t const *)test_ctx->blockhash_queue[0]->bytes : (fd_hash_t const *)empty_bytes;
     fd_sysvar_epoch_rewards_init( slot_ctx, 0UL, 0UL, 2UL, 1UL, point_value, last_hash);
@@ -755,8 +756,9 @@ _txn_context_create_and_exec( fd_exec_instr_test_runner_t *      runner,
   /* Blockhash queue init */
   slot_ctx->slot_bank.block_hash_queue.max_age   = FD_BLOCKHASH_QUEUE_MAX_ENTRIES;
   slot_ctx->slot_bank.block_hash_queue.ages_root = NULL;
-  slot_ctx->slot_bank.block_hash_queue.ages_pool = fd_hash_hash_age_pair_t_map_alloc( fd_spad_virtual( runner->spad ), 400 );
-  slot_ctx->slot_bank.block_hash_queue.last_hash = fd_valloc_malloc( fd_spad_virtual( runner->spad ), FD_HASH_ALIGN, FD_HASH_FOOTPRINT );
+  uchar * pool_mem = fd_spad_alloc( runner->spad, fd_hash_hash_age_pair_t_map_align(), fd_hash_hash_age_pair_t_map_footprint( 400 ) );
+  slot_ctx->slot_bank.block_hash_queue.ages_pool = fd_hash_hash_age_pair_t_map_join( fd_hash_hash_age_pair_t_map_new( pool_mem, 400 ) );
+  slot_ctx->slot_bank.block_hash_queue.last_hash = fd_spad_alloc( runner->spad, FD_HASH_ALIGN, FD_HASH_FOOTPRINT );
 
   // Save lamports per signature for most recent blockhash, if sysvar cache contains recent block hashes
   fd_recent_block_hashes_t const * rbh = fd_sysvar_cache_recent_block_hashes( slot_ctx->sysvar_cache );
@@ -941,18 +943,14 @@ void
 fd_exec_test_instr_context_destroy( fd_exec_instr_test_runner_t * runner,
                                     fd_exec_instr_ctx_t *         ctx ) {
   if( !ctx ) return;
-  fd_exec_slot_ctx_t *  slot_ctx  = (fd_exec_slot_ctx_t *)ctx->slot_ctx;
-  if( !slot_ctx ) return;
-  fd_acc_mgr_t *        acc_mgr   = slot_ctx->acc_mgr;
-  fd_funk_txn_t *       funk_txn  = slot_ctx->funk_txn;
+  fd_acc_mgr_t *        acc_mgr   = ctx->txn_ctx->acc_mgr;
+  fd_funk_txn_t *       funk_txn  = ctx->txn_ctx->funk_txn;
 
   fd_acc_mgr_delete( acc_mgr );
 
   fd_funk_start_write( runner->funk );
   fd_funk_txn_cancel( runner->funk, funk_txn, 1 );
   fd_funk_end_write( runner->funk );
-
-  ctx->slot_ctx = NULL;
 }
 
 static void
@@ -1485,7 +1483,7 @@ fd_exec_vm_syscall_test_run( fd_exec_instr_test_runner_t * runner,
   fd_vm_input_region_t    input_mem_regions[1000] = {0}; /* We can have a max of (3 * num accounts + 1) regions */
   fd_vm_acc_region_meta_t acc_region_metas[256]   = {0}; /* instr acc idx to idx */
   uint                    input_mem_regions_cnt   = 0U;
-  int                     direct_mapping          = FD_FEATURE_ACTIVE( ctx->slot_ctx, bpf_account_data_direct_mapping );
+  int                     direct_mapping          = FD_FEATURE_ACTIVE( ctx->txn_ctx->slot_bank->slot, ctx->txn_ctx->features, bpf_account_data_direct_mapping );
 
   uchar * input_ptr      = NULL;
   uchar   program_id_idx = ctx->instr->program_id;
@@ -1503,28 +1501,27 @@ fd_exec_vm_syscall_test_run( fd_exec_instr_test_runner_t * runner,
                                             is_deprecated,
                                             &input_ptr );
 
-  fd_vm_init(
-    vm,
-    ctx,
-    input->vm_ctx.heap_max,
-    ctx->txn_ctx->compute_meter,
-    rodata,
-    rodata_sz,
-    NULL, // TODO
-    0, // TODO
-    0, // TODO
-    0, // TODO, text_sz
-    0, // TODO
-    NULL, // TODO
-    TEST_VM_DEFAULT_SBPF_VERSION,
-    syscalls,
-    NULL, // TODO
-    sha,
-    input_mem_regions,
-    input_mem_regions_cnt,
-    acc_region_metas,
-    is_deprecated,
-    FD_FEATURE_ACTIVE( ctx->slot_ctx, bpf_account_data_direct_mapping ) );
+  fd_vm_init( vm,
+              ctx,
+              input->vm_ctx.heap_max,
+              ctx->txn_ctx->compute_meter,
+              rodata,
+              rodata_sz,
+              NULL, // TODO
+              0, // TODO
+              0, // TODO
+              0, // TODO, text_sz
+              0, // TODO
+              NULL, // TODO
+              TEST_VM_DEFAULT_SBPF_VERSION,
+              syscalls,
+              NULL, // TODO
+              sha,
+              input_mem_regions,
+              input_mem_regions_cnt,
+              acc_region_metas,
+              is_deprecated,
+              FD_FEATURE_ACTIVE( ctx->txn_ctx->slot_bank->slot, ctx->txn_ctx->features, bpf_account_data_direct_mapping ) );
 
   // Override some execution state values from the syscall fuzzer input
   // This is so we can test if the syscall mutates any of these erroneously
@@ -1571,8 +1568,6 @@ fd_exec_vm_syscall_test_run( fd_exec_instr_test_runner_t * runner,
   *instr_ctx = (fd_exec_instr_ctx_t) {
     .instr     = ctx->instr,
     .txn_ctx   = ctx->txn_ctx,
-    .epoch_ctx = ctx->epoch_ctx,
-    .slot_ctx  = ctx->slot_ctx,
     .acc_mgr   = ctx->acc_mgr,
     .funk_txn  = ctx->funk_txn,
     .parent    = NULL,

@@ -428,7 +428,9 @@ struct fd_topo {
   fd_topo_obj_t  objs[ FD_TOPO_MAX_OBJS ];
 
   ulong          agave_affinity_cnt;
+# if !FD_HAS_NO_AGAVE
   ulong          agave_affinity_cpu_idx[ FD_TILE_MAX ];
+# endif
 
   ulong          max_page_size; /* 2^21 or 2^30 */
 };
@@ -685,8 +687,8 @@ fd_topo_workspace_fill( fd_topo_t *      topo,
    workspace in the topology. */
 
 void
-fd_topo_wksp_apply( fd_topo_t *      topo,
-                    fd_topo_wksp_t * wksp,
+fd_topo_wksp_apply( fd_topo_t const *      topo,
+                    fd_topo_wksp_t const * wksp,
                     void (* fn )( fd_topo_t const * topo, fd_topo_obj_t const * obj ) );
 
 /* Same as fd_topo_fill_tile but fills in all tiles in the topology. */
@@ -707,7 +709,7 @@ fd_topo_tile_stack_join( char const * app_name,
    and return the xsk_map_fd. */
 
 fd_xdp_fds_t
-fd_topo_install_xdp( fd_topo_t * topo );
+fd_topo_install_xdp( fd_topo_t const * topo );
 
 /* fd_topo_run_single_process runs all the tiles in a single process
    (the calling process).  This spawns a thread for each tile, switches
@@ -735,12 +737,12 @@ fd_topo_install_xdp( fd_topo_t * topo );
    started regardless of if they are Agave tiles or not. */
 
 void
-fd_topo_run_single_process( fd_topo_t * topo,
-                            int         agave,
-                            uint        uid,
-                            uint        gid,
-                            fd_topo_run_tile_t (* tile_run )( fd_topo_tile_t * tile ),
-                            int *       done_futex );
+fd_topo_run_single_process( fd_topo_t *       topo,
+                            int               agave,
+                            uint              uid,
+                            uint              gid,
+                            fd_topo_run_tile_t (* tile_run )( fd_topo_tile_t const * tile ),
+                            int *             done_futex );
 
 /* fd_topo_run_tile runs the given tile directly within the current
    process (and thread).  The function will never return, as tiles are

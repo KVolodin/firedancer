@@ -1284,7 +1284,7 @@ prepare_new_block_execution( fd_replay_tile_ctx_t * ctx,
   }
 
   /* Read slot history into slot ctx */
-  fork->slot_ctx.slot_history = fd_sysvar_slot_history_read( &fork->slot_ctx, ctx->runtime_spad );
+  fork->slot_ctx.slot_history = fd_sysvar_slot_history_read( fork->slot_ctx.acc_mgr, fork->slot_ctx.funk_txn, ctx->runtime_spad );
 
   if( is_new_epoch_in_new_block ) {
     publish_stake_weights( ctx, stem, &fork->slot_ctx );
@@ -1743,7 +1743,7 @@ after_frag( fd_replay_tile_ctx_t * ctx,
       FD_LOG_ERR(( "failed to insert ghost node %lu", fork->slot ));
     }
 #endif
-    fd_forks_update( ctx->forks, ctx->blockstore, ctx->epoch, ctx->funk, ctx->ghost, fork->slot );
+    fd_forks_update( ctx->forks, ctx->epoch, ctx->funk, ctx->ghost, fork->slot );
 
     /**********************************************************************/
     /* Consensus: decide (1) the fork for pack; (2) the fork to vote on   */
@@ -2410,7 +2410,7 @@ during_housekeeping( void * _ctx ) {
   /* Update watermark. The publish watermark is the minimum of the tower
      root and supermajority root. */
 
-  ulong wmark = fd_ulong_min( ctx->root, ctx->forks->finalized_wmark );
+  ulong wmark = fd_ulong_min( ctx->root, ctx->forks->finalized );
 
   if ( FD_LIKELY( wmark <= fd_fseq_query( ctx->published_wmark ) ) ) return;
   FD_LOG_NOTICE(( "wmk %lu => %lu", fd_fseq_query( ctx->published_wmark ), wmark ));

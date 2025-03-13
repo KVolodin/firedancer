@@ -48,10 +48,13 @@ fd_hashes_load( fd_exec_slot_ctx_t * slot_ctx, fd_spad_t * runtime_spad ) {
   /* FIXME: Do not hardcode the number of vote accounts */
 
   slot_ctx->slot_bank.stake_account_keys.account_keys_root = NULL;
-  slot_ctx->slot_bank.stake_account_keys.account_keys_pool = fd_account_keys_pair_t_map_alloc( fd_spad_virtual( runtime_spad ), 100000UL );
+  uchar * pool_mem = fd_spad_alloc( runtime_spad, fd_account_keys_pair_t_map_align(), fd_account_keys_pair_t_map_footprint( 100000UL ) );
+
+  slot_ctx->slot_bank.stake_account_keys.account_keys_pool = fd_account_keys_pair_t_map_join( fd_account_keys_pair_t_map_new( pool_mem, 100000UL ) );
 
   slot_ctx->slot_bank.vote_account_keys.account_keys_root = NULL;
-  slot_ctx->slot_bank.vote_account_keys.account_keys_pool = fd_account_keys_pair_t_map_alloc( fd_spad_virtual( runtime_spad ), 100000UL );
+  pool_mem = fd_spad_alloc( runtime_spad, fd_account_keys_pair_t_map_align(), fd_account_keys_pair_t_map_footprint( 100000UL ) );
+  slot_ctx->slot_bank.vote_account_keys.account_keys_pool = fd_account_keys_pair_t_map_join( fd_account_keys_pair_t_map_new( pool_mem, 100000UL ) );
 
   slot_ctx->slot_bank.collected_execution_fees = 0UL;
   slot_ctx->slot_bank.collected_priority_fees  = 0UL;
@@ -132,7 +135,7 @@ fd_snapshot_load_init( fd_snapshot_load_ctx_t * ctx ) {
 
   ctx->par_txn   = ctx->slot_ctx->funk_txn;
   ctx->child_txn = ctx->slot_ctx->funk_txn;
-  if( ctx->verify_hash && FD_FEATURE_ACTIVE( ctx->slot_ctx, incremental_snapshot_only_incremental_hash_calculation ) ) {
+  if( ctx->verify_hash && FD_FEATURE_ACTIVE( ctx->slot_ctx->slot_bank.slot, ctx->slot_ctx->epoch_ctx->features, incremental_snapshot_only_incremental_hash_calculation ) ) {
     fd_funk_txn_xid_t xid;
     memset( &xid, 0xc3, sizeof(xid) );
     ctx->child_txn = fd_funk_txn_prepare( ctx->slot_ctx->acc_mgr->funk, ctx->child_txn, &xid, 0 );
@@ -232,7 +235,7 @@ fd_snapshot_load_fini( fd_snapshot_load_ctx_t * ctx ) {
   fd_calculate_epoch_accounts_hash_values( ctx->slot_ctx );
 
   // https://github.com/anza-xyz/agave/blob/766cd682423b8049ddeac3c0ec6cebe0a1356e9e/runtime/src/bank.rs#L1831
-  if( FD_FEATURE_ACTIVE( ctx->slot_ctx, accounts_lt_hash) ) {
+  if( FD_FEATURE_ACTIVE( ctx->slot_ctx->slot_bank.slot, ctx->slot_ctx->epoch_ctx->features, accounts_lt_hash ) ) {
     ulong *p = (ulong *) ctx->slot_ctx->slot_bank.lthash.lthash;
     ulong *e = (ulong *) &ctx->slot_ctx->slot_bank.lthash.lthash[sizeof(ctx->slot_ctx->slot_bank.lthash.lthash)];
     while (p < e) {
@@ -258,7 +261,7 @@ fd_snapshot_load_fini( fd_snapshot_load_ctx_t * ctx ) {
     } else if( ctx->snapshot_type == FD_SNAPSHOT_TYPE_INCREMENTAL ) {
       fd_hash_t accounts_hash;
 
-      if( FD_FEATURE_ACTIVE( ctx->slot_ctx, incremental_snapshot_only_incremental_hash_calculation ) ) {
+      if( FD_FEATURE_ACTIVE( ctx->slot_ctx->slot_bank.slot, ctx->slot_ctx->epoch_ctx->features, incremental_snapshot_only_incremental_hash_calculation ) ) {
         FD_LOG_NOTICE(( "hashing incremental snapshot with only deltas" ));
         fd_snapshot_inc_hash( ctx->slot_ctx, &accounts_hash, ctx->child_txn, ctx->check_hash, ctx->runtime_spad );
       } else {

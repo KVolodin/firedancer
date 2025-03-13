@@ -1,6 +1,5 @@
 #include "../../ballet/shred/fd_shred.h"
 #include "../../ballet/shred/fd_fec_set.h"
-#include "../../ballet/bmtree/fd_bmtree.h"
 #include "../../ballet/sha512/fd_sha512.h"
 #include "../../ballet/ed25519/fd_ed25519.h"
 #include "../../ballet/reedsol/fd_reedsol.h"
@@ -310,11 +309,12 @@ ctx_ll_insert( set_ctx_t * p, set_ctx_t * c ) {
 
 
 int fd_fec_resolver_add_shred( fd_fec_resolver_t    * resolver,
-                               fd_shred_t   const   * shred,
+                               fd_shred_t const     * shred,
                                ulong                  shred_sz,
-                               uchar        const   * leader_pubkey,
+                               uchar const          * leader_pubkey,
                                fd_fec_set_t const * * out_fec_set,
-                               fd_shred_t   const * * out_shred ) {
+                               fd_shred_t const   * * out_shred,
+                               fd_bmtree_node_t     * out_merkle_root ) {
   /* Unpack variables */
   ulong partial_depth = resolver->partial_depth;
   ulong done_depth    = resolver->done_depth;
@@ -458,6 +458,9 @@ int fd_fec_resolver_add_shred( fd_fec_resolver_t    * resolver,
       return FD_FEC_RESOLVER_SHRED_REJECTED;
     }
 
+    /* Copy the merkle root into the output arg. */
+    if( FD_LIKELY( out_merkle_root ) ) memcpy( out_merkle_root, _root, sizeof(fd_bmtree_node_t) );
+
     /* This seems like a legitimate FEC set, so we can reserve some
        resources for it. */
     ctx = ctx_ll_insert( curr_ll_sentinel, ctx_map_insert( curr_map, *w_sig ) );
@@ -576,7 +579,7 @@ int fd_fec_resolver_add_shred( fd_fec_resolver_t    * resolver,
   for( ulong i=0UL; i<set->data_shred_cnt; i++ ) {
     if( !d_rcvd_test( set->data_shred_rcvd, i ) ) {
       fd_memcpy( set->data_shreds[i], shred, sizeof(fd_ed25519_sig_t) );
-      if( FD_UNLIKELY( fd_shred_is_chained( shred_type ) ) ) {
+      if( FD_LIKELY( fd_shred_is_chained( shred_type ) ) ) {
         fd_memcpy( set->data_shreds[i]+fd_shred_chain_off( data_variant ), chained_root, FD_SHRED_MERKLE_ROOT_SZ );
       }
       fd_bmtree_hash_leaf( leaf, set->data_shreds[i]+sizeof(fd_ed25519_sig_t), data_merkle_protected_sz, FD_BMTREE_LONG_PREFIX_SZ );
@@ -603,7 +606,7 @@ int fd_fec_resolver_add_shred( fd_fec_resolver_t    * resolver,
       p_shred->code.code_cnt = (ushort)set->parity_shred_cnt;
       p_shred->code.idx      = (ushort)i;
 
-      if( FD_UNLIKELY( fd_shred_is_chained( shred_type ) ) ) {
+      if( FD_LIKELY( fd_shred_is_chained( shred_type ) ) ) {
         fd_memcpy( set->parity_shreds[i]+fd_shred_chain_off( parity_variant ), chained_root, FD_SHRED_MERKLE_ROOT_SZ );
       }
 

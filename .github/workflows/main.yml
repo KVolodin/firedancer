@@ -25,7 +25,7 @@ jobs:
 
       - name: Build Firedancer
         run: |
-          contrib/build.sh --no-rust --no-gcc
+          contrib/build.sh --no-rust --no-gcc -t fdctl
 
       - name: Archive binaries
         run: |

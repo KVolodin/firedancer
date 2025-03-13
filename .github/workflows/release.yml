@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"  # Trigger only on tags like vX.Y.Z
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true  # Fetch submodules
+
+      - name: Install dependencies
+        run: |
+          ./deps.sh +dev
+
+      - name: Build Firedancer
+        run: |
+          make -j $(nproc)
+
+      - name: Archive binaries
+        run: |
+          tar -czvf firedancer-${{ github.ref_name }}-linux-amd64.tar.gz build/
+
+      - name: Create release and upload artifacts
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Firedancer ${{ github.ref_name }}"
+          body: "🚀 Automatically built Firedancer release."
+          files: |
+            firedancer-${{ github.ref_name }}-linux-amd64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

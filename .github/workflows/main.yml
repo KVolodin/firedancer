@@ -23,15 +23,9 @@ jobs:
         with:
           submodules: true  # Fetch submodules
 
-      - name: Install dependencies
-        run: |
-          bash -x ./deps.sh fetch
-          bash -x ./deps.sh check
-          bash -x ./deps.sh install
-
       - name: Build Firedancer
         run: |
-          make -j $(nproc)
+          contrib/build.sh --no-rust --no-gcc
 
       - name: Archive binaries
         run: |

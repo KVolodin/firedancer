@@ -1,10 +1,5 @@
 name: Release
 
-# on:
-#   push:
-#     tags:
-#       - "v*.*.*"  # Trigger only on tags like vX.Y.Z
-
 on:
   push:
     branches:
@@ -20,27 +15,26 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: true  # Fetch submodules
 
-      - name: Build Firedancer
+      - name: Create dry-run file
         run: |
-          make -j fdctl
+          echo "Dry run for Firedancer release" > dry-run.txt
+          echo "Timestamp: $(date)" >> dry-run.txt
+          echo "GitHub Ref: ${{ github.ref }}" >> dry-run.txt
+          echo "GitHub SHA: ${{ github.sha }}" >> dry-run.txt
+          cat dry-run.txt
 
-      - name: Archive binaries
+      - name: Archive dry-run file
         run: |
-          ls -lah ./build/
-          ls -lah ./build/native/
-          ls -lah ./build/native/gcc/
-          tar -czvf firedancer-${{ github.ref_name }}-linux-amd64.tar.gz ./build/native/gcc/bin/fdctl
+          tar -czvf firedancer-${{ github.ref_name }}-dry-run.tar.gz dry-run.txt
 
       - name: Create release and upload artifacts
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Firedancer ${{ github.ref_name }}"
-          body: "🚀 Automatically built Firedancer release."
+          name: "Firedancer Dry Run ${{ github.ref_name }}"
+          body: "🚀 Dry run for Firedancer release."
           files: |
-            firedancer-${{ github.ref_name }}-linux-amd64.tar.gz
+            firedancer-${{ github.ref_name }}-dry-run.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

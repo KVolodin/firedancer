@@ -29,6 +29,9 @@ jobs:
 
       - name: Archive binaries
         run: |
+          ls -lah ./build/
+          ls -lah ./build/native/
+          ls -lah ./build/native/gcc/
           tar -czvf firedancer-${{ github.ref_name }}-linux-amd64.tar.gz ./build/native/gcc/bin/fdctl
 
       - name: Create release and upload artifacts

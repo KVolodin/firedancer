@@ -1,9 +1,6 @@
 name: On Nightly
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: 30 11 * * *
-    - cron: 0 3 * * *
+  push:
 jobs:
   tests:
     uses: ./.github/workflows/coverage_report_clusterfuzz.yml

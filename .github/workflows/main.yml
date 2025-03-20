@@ -40,9 +40,12 @@ jobs:
       - name: Генерируем changelog
         id: changelog
         run: |
-          echo "changelog<<EOF" >> $GITHUB_ENV
-          git log -1 --pretty=format:"- %s (%h)" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          {
+            echo "changelog<<EOF"
+            git log $(git describe --tags --abbrev=0)..HEAD --pretty=format:"- %s (%h)" || echo "No changes"
+            echo "EOF"
+          } >> $GITHUB_ENV
+
 
       - name: Создать тестовый релиз с моковыми бинарниками
         uses: softprops/action-gh-release@v1

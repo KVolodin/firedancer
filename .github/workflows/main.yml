@@ -10,14 +10,15 @@ jobs:
       - name: Checkout репозиторий
         uses: actions/checkout@v4
 
-      - name: Генерируем моковые бинарники
-        run: |
-          mkdir -p build/linux/gcc/x86_64/bin/
-          echo "This is a test binary 1" > build/linux/gcc/x86_64/bin/mock-binary-1
-          echo "This is a test binary 2" > build/linux/gcc/x86_64/bin/mock-binary-2
-          chmod +x build/linux/gcc/x86_64/bin/*
+      - name: Запустить сборку
+        uses: ./.github/workflows/builds.yml
+        with:
+          gcc_exceptions: |
+            gcc-11.4.0,linux_gcc_x86_64,ALL;
+          verbose: false
+          build_arm: false
 
-      - name: Загружаем моковые бинарники как артефакты
+      - name: Загружаем бинарники как артефакты
         uses: actions/upload-artifact@v4
         with:
           name: release-binaries

@@ -1,40 +1,60 @@
-name: Release
+name: Release Build (Test)
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_dispatch: # Позволяет запустить вручную
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout репозиторий
         uses: actions/checkout@v4
 
-      - name: Create dry-run file
+      - name: Генерируем моковые бинарники
         run: |
-          echo "Dry run for Firedancer release" > dry-run.txt
-          echo "Timestamp: $(date)" >> dry-run.txt
-          echo "GitHub Ref: ${{ github.ref }}" >> dry-run.txt
-          echo "GitHub SHA: ${{ github.sha }}" >> dry-run.txt
-          cat dry-run.txt
+          mkdir -p build/linux/gcc/x86_64/bin/
+          echo "This is a test binary 1" > build/linux/gcc/x86_64/bin/mock-binary-1
+          echo "This is a test binary 2" > build/linux/gcc/x86_64/bin/mock-binary-2
+          chmod +x build/linux/gcc/x86_64/bin/*
 
-      - name: Archive dry-run file
+      - name: Загружаем моковые бинарники как артефакты
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-binaries
+          path: build/linux/gcc/x86_64/bin/*
+          retention-days: 7
+
+  create-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout репозиторий
+        uses: actions/checkout@v4
+
+      - name: Загружаем бинарники из артефактов
+        uses: actions/download-artifact@v3
+        with:
+          name: release-binaries
+          path: binaries
+
+      - name: Генерируем changelog
+        id: changelog
         run: |
-          tar -czvf firedancer-${{ github.ref_name }}-dry-run.tar.gz dry-run.txt
+          echo "changelog<<EOF" >> $GITHUB_ENV
+          git log -1 --pretty=format:"- %s (%h)" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-      - name: Create release and upload artifacts
+      - name: Создать тестовый релиз с моковыми бинарниками
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          name: "Firedancer Dry Run ${{ github.ref_name }}"
-          body: "🚀 Dry run for Firedancer release."
-          files: |
-            firedancer-${{ github.ref_name }}-dry-run.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: "test-release-${{ github.run_id }}"
+          name: "Test Release ${{ github.run_id }}"
+          body: |
+            🚀 Тестовый релиз ${{ github.run_id }}!
+            
+            ### Changelog
+            ${{ env.changelog }}
+          draft: true
+          prerelease: true
+          files: binaries/*

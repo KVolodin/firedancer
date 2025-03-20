@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout репозиторий1
+      - name: Checkout репозиторий
         uses: actions/checkout@v4
 
       - name: Генерируем моковые бинарники
@@ -18,7 +18,7 @@ jobs:
           chmod +x build/linux/gcc/x86_64/bin/*
 
       - name: Загружаем моковые бинарники как артефакты
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release-binaries
           path: build/linux/gcc/x86_64/bin/*

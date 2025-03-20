@@ -7,7 +7,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout репозиторий
+      - name: Checkout репозиторий1
         uses: actions/checkout@v4
 
       - name: Генерируем моковые бинарники
